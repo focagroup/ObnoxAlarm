@@ -118,7 +118,7 @@ class AlarmScreenLayoutTest {
     }
 
     private fun assertCoreControlsVisible() {
-        composeRule.onNodeWithText("Lux Alarm").assertIsDisplayed()
+        composeRule.onNodeWithText("ObnoxAlarm").assertIsDisplayed()
         composeRule.onNodeWithText("07:05").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Add Alarm").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Settings").assertIsDisplayed()

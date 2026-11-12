@@ -43,7 +43,7 @@ class LuxAlarmAppNavigationTest {
     fun startsOnTheAlarmList() {
         setContent()
 
-        composeRule.onNodeWithText("Lux Alarm").assertIsDisplayed()
+        composeRule.onNodeWithText("ObnoxAlarm").assertIsDisplayed()
         composeRule.onNodeWithText("Required Light Level").assertDoesNotExist()
     }
 
@@ -54,7 +54,7 @@ class LuxAlarmAppNavigationTest {
         composeRule.onNodeWithContentDescription("Settings").performClick()
 
         composeRule.onNodeWithText("Required Light Level").assertIsDisplayed()
-        composeRule.onNodeWithText("Lux Alarm").assertDoesNotExist()
+        composeRule.onNodeWithText("ObnoxAlarm").assertDoesNotExist()
     }
 
     @Test
@@ -64,7 +64,7 @@ class LuxAlarmAppNavigationTest {
 
         composeRule.onNodeWithContentDescription("Back").performClick()
 
-        composeRule.onNodeWithText("Lux Alarm").assertIsDisplayed()
+        composeRule.onNodeWithText("ObnoxAlarm").assertIsDisplayed()
     }
 
     /** A rotation recreates the activity, so the flag has to be saved, not merely remembered. */

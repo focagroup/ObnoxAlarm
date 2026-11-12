@@ -27,6 +27,10 @@ class SettingsManager(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    /** Kept in its own file, excluded from backups, so a reinstall really does clear it. */
+    private val lockPrefs: SharedPreferences =
+        context.getSharedPreferences(LOCK_PREFS_NAME, Context.MODE_PRIVATE)
+
     private val _requiredLuxLevel = MutableStateFlow(getRequiredLuxLevel())
     val requiredLuxLevel: StateFlow<Float> = _requiredLuxLevel.asStateFlow()
 
@@ -39,9 +43,40 @@ class SettingsManager(context: Context) {
         _requiredLuxLevel.value = level
     }
 
+    private val _minLightMinutes = MutableStateFlow(getMinLightMinutes())
+    val minLightMinutes: StateFlow<Int> = _minLightMinutes.asStateFlow()
+
+    fun getMinLightMinutes(): Int =
+        prefs
+            .getInt(KEY_MIN_LIGHT_MINUTES, DEFAULT_MIN_LIGHT_MINUTES)
+            .coerceIn(MIN_LIGHT_MINUTES, MAX_LIGHT_MINUTES)
+
+    fun setMinLightMinutes(minutes: Int) {
+        val value = minutes.coerceIn(MIN_LIGHT_MINUTES, MAX_LIGHT_MINUTES)
+        prefs.edit { putInt(KEY_MIN_LIGHT_MINUTES, value) }
+        _minLightMinutes.value = value
+    }
+
+    private val _obnoxiousMode = MutableStateFlow(isObnoxiousMode())
+    val obnoxiousMode: StateFlow<Boolean> = _obnoxiousMode.asStateFlow()
+
+    fun isObnoxiousMode(): Boolean = lockPrefs.getBoolean(KEY_OBNOXIOUS_MODE, false)
+
+    /** One way only: there is deliberately no way to turn it back off short of a reinstall. */
+    fun enableObnoxiousMode() {
+        lockPrefs.edit(commit = true) { putBoolean(KEY_OBNOXIOUS_MODE, true) }
+        _obnoxiousMode.value = true
+    }
+
     companion object {
         private const val PREFS_NAME = "lux_alarm_settings"
+        internal const val LOCK_PREFS_NAME = "obnoxious_lock"
         private const val KEY_REQUIRED_LUX_LEVEL = "required_lux_level"
+        private const val KEY_MIN_LIGHT_MINUTES = "min_light_minutes"
+        private const val KEY_OBNOXIOUS_MODE = "obnoxious_mode"
+        const val DEFAULT_MIN_LIGHT_MINUTES = 10
+        const val MIN_LIGHT_MINUTES = 10
+        const val MAX_LIGHT_MINUTES = 60
         const val DEFAULT_LUX_LEVEL = 50f
         const val MIN_LUX_LEVEL = 1f
         const val MAX_LUX_LEVEL = 1000f

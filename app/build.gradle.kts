@@ -20,11 +20,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.dsalmun.luxalarm"
+        applicationId = "com.dsalmun.luxalarm.obnoxious"
         minSdk = 28
         targetSdk = 37
-        versionCode = 15
-        versionName = "2.4.2"
+        versionCode = 16
+        versionName = "69.420.67"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

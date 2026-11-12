@@ -100,7 +100,7 @@ class SettingsScreenContentTest {
         setContent(currentLightLevel = 0f, requiredLuxLevel = 50f)
 
         composeRule
-            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))[0]
             .performSemanticsAction(SemanticsActions.SetProgress) { it(300f) }
 
         assertEquals(1, changes.size)

@@ -247,7 +247,7 @@ fun AlarmScreenContent(
         },
         topBar = {
             TopAppBar(
-                title = { Text("Lux Alarm") },
+                title = { Text("ObnoxAlarm") },
                 actions = {
                     IconButton(onClick = onSettingsClick) {
                         Icon(

@@ -21,13 +21,21 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dsalmun.luxalarm.ui.theme.LuxAlarmTheme
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -49,6 +57,11 @@ class SettingsScreenTest {
             .edit()
             .clear()
             .commit()
+        context
+            .getSharedPreferences(SettingsManager.LOCK_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
         settingsManager = SettingsManager(context)
     }
 
@@ -66,7 +79,7 @@ class SettingsScreenTest {
         setContent()
 
         composeRule
-            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))[0]
             .performSemanticsAction(SemanticsActions.SetProgress) { it(300f) }
 
         assertEquals(300f, settingsManager.getRequiredLuxLevel())
@@ -83,10 +96,49 @@ class SettingsScreenTest {
         setContent()
 
         composeRule
-            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))[0]
             .performSemanticsAction(SemanticsActions.SetProgress) { it(300f) }
 
         composeRule.onNodeWithText("300 lux").assertIsDisplayed()
+    }
+
+    @Test
+    fun releasingTheDurationSlider_persistsTheMinutes() {
+        setContent()
+
+        composeRule
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))[1]
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(25f) }
+
+        composeRule.onNodeWithText("25 min").assertIsDisplayed()
+        assertEquals(25, SettingsManager(context).getMinLightMinutes())
+    }
+
+    @Test
+    fun theDurationDefaultsToTenMinutes() {
+        setContent()
+
+        composeRule.onNodeWithText("10 min").assertIsDisplayed()
+    }
+
+    @Test
+    fun checkingTornado_locksItWithoutAPopup() {
+        setContent()
+        composeRule.onNodeWithText("tornado").assertIsDisplayed()
+        composeRule.onNodeWithText("Makes the alarm a lot more convincing.").assertIsDisplayed()
+        composeRule.onNode(isToggleable()).assertIsOff()
+
+        composeRule.onNode(isToggleable()).performClick()
+
+        assertTrue(SettingsManager(context).isObnoxiousMode(), "It has to survive a restart")
+        composeRule.onNode(isToggleable()).assertIsOn().assertIsNotEnabled()
+        composeRule.onNodeWithText("a wise choice has been made").assertIsDisplayed()
+        composeRule.onNode(isDialog()).assertDoesNotExist()
+    }
+
+    @Test
+    fun obnoxiousMode_isOffByDefault() {
+        assertFalse(settingsManager.isObnoxiousMode())
     }
 
     private fun setContent(currentLightLevel: Float = 0f) {

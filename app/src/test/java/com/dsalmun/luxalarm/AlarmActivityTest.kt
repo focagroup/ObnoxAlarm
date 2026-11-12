@@ -37,6 +37,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestWatcher
@@ -123,11 +124,34 @@ class AlarmActivityTest {
         composeRule.onNodeWithText("Need More Light").assertIsNotEnabled()
     }
 
+    @After
+    fun resetGate() {
+        AlarmService._gateState.value = GateState()
+    }
+
+    /** A flashlight flicked on for a moment must not be enough: the hold has to finish first. */
     @Test
-    fun aBrightReading_unlocksTheStopButton() {
+    fun aBrightReadingAlone_doesNotUnlockTheStopButton() {
         sendLightReading(BRIGHT)
 
+        composeRule.onNodeWithText("Keep It Bright").assertIsNotEnabled()
+    }
+
+    @Test
+    fun aFinishedHold_unlocksTheStopButton() {
+        sendLightReading(BRIGHT)
+        finishHold()
+
         composeRule.onNodeWithText("Turn Off Alarm").assertIsEnabled()
+    }
+
+    @Test
+    fun aRunningHold_showsTheCountdown() {
+        sendLightReading(BRIGHT)
+        AlarmService._gateState.value = GateState(GateSound.SILENT, holdRemainingMs = 9 * 60_000L)
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Keep the light on: 9:00").assertExists()
     }
 
     @Test
@@ -138,11 +162,14 @@ class AlarmActivityTest {
     }
 
     @Test
-    fun theButtonTracksTheLightLevelInBothDirections() {
+    fun theButtonTracksTheHoldInBothDirections() {
         sendLightReading(BRIGHT)
+        finishHold()
         composeRule.onNodeWithText("Turn Off Alarm").assertIsEnabled()
 
         sendLightReading(DARK)
+        AlarmService._gateState.value = GateState(GateSound.ALARM, violated = true)
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("Need More Light").assertIsNotEnabled()
     }
 
@@ -150,11 +177,11 @@ class AlarmActivityTest {
     @Test
     fun aReadingFromAnotherSensor_isIgnored() {
         sendLightReading(BRIGHT)
-        composeRule.onNodeWithText("Turn Off Alarm").assertIsEnabled()
+        composeRule.onNodeWithText("Keep It Bright").assertExists()
 
         sendReading(Sensor.TYPE_PROXIMITY, DARK)
 
-        composeRule.onNodeWithText("Turn Off Alarm").assertIsEnabled()
+        composeRule.onNodeWithText("Keep It Bright").assertExists()
     }
 
     @Test
@@ -196,6 +223,7 @@ class AlarmActivityTest {
     @Test
     fun stoppingTheAlarm_tellsTheServiceWhichAlarmToStopAndCloses() {
         sendLightReading(BRIGHT)
+        finishHold()
 
         composeRule.onNodeWithText("Turn Off Alarm").performClick()
 
@@ -215,6 +243,11 @@ class AlarmActivityTest {
     }
 
     private fun sendLightReading(lux: Float) = sendReading(Sensor.TYPE_LIGHT, lux)
+
+    private fun finishHold() {
+        AlarmService._gateState.value = GateState(GateSound.SILENT, canStop = true)
+        composeRule.waitForIdle()
+    }
 
     private fun sendReading(sensorType: Int, value: Float) {
         val event: SensorEvent =

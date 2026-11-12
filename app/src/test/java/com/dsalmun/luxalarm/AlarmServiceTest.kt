@@ -21,6 +21,8 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -53,7 +55,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowAudioManager
+import org.robolectric.shadows.SensorEventBuilder
 import org.robolectric.shadows.ShadowMediaPlayer
+import org.robolectric.shadows.ShadowSensor
+import java.time.Duration
 import org.robolectric.shadows.util.DataSource
 
 /** Above all the teardown: a ringing alarm that cannot be stopped is this app's worst failure. */
@@ -103,8 +108,16 @@ class AlarmServiceTest {
             DataSource.toDataSource(context, CUSTOM_RINGTONE.toUri()),
             ShadowMediaPlayer.MediaInfo(5_000, 0),
         )
+        for ((res, ms) in listOf(R.raw.tornado to 5_000, R.raw.bruh to 500, R.raw.scream to 3_000)) {
+            ShadowMediaPlayer.addMediaInfo(
+                DataSource.toDataSource(context, raw(res)),
+                ShadowMediaPlayer.MediaInfo(ms, 0),
+            )
+        }
         ShadowMediaPlayer.setCreateListener { player, _ -> createdPlayers.add(player) }
     }
+
+    private fun raw(res: Int) = "android.resource://${context.packageName}/$res".toUri()
 
     @After
     fun tearDown() {
@@ -458,6 +471,111 @@ class AlarmServiceTest {
             listOf(0L, 1_000L, 500L, 1_000L, 500L),
             shadowOf(legacyVibrator).pattern?.toList(),
         )
+    }
+
+    @Test
+    fun obnoxiousMode_replacesTheAlarmSoundWithTheTornado() {
+        appContainer.settingsManager.enableObnoxiousMode()
+
+        start(ringtoneUri = CUSTOM_RINGTONE)
+
+        val player = createdPlayers.single()
+        assertEquals(raw(R.raw.tornado), shadowOf(player).sourceUri)
+        assertTrue(player.isLooping)
+        assertTrue(player.isPlaying)
+    }
+
+    @Test
+    fun lightOn_silencesTheAlarmWithoutStoppingIt() {
+        addLightSensor()
+        start()
+
+        sendLight(300f)
+
+        assertFalse(createdPlayers.single().isPlaying)
+        assertTrue(AlarmService.isRunning)
+        assertFalse(AlarmService.gateState.value.canStop, "The hold has only just begun")
+    }
+
+    @Test
+    fun aLongEnoughHold_unlocksStopping() {
+        addLightSensor()
+        start()
+        sendLight(300f)
+
+        advance(Duration.ofMinutes(10))
+
+        assertTrue(AlarmService.gateState.value.canStop)
+    }
+
+    @Test
+    fun normalMode_aViolationBringsTheAlarmBack() {
+        addLightSensor()
+        start()
+        sendLight(300f)
+        sendLight(5f)
+
+        advance(Duration.ofSeconds(5))
+
+        assertTrue(createdPlayers.single().isPlaying)
+    }
+
+    @Test
+    fun obnoxiousMode_aViolationBruhsThriceThenScreamsUntilTheLightIsBack() {
+        appContainer.settingsManager.enableObnoxiousMode()
+        addLightSensor()
+        start()
+        sendLight(300f)
+        sendLight(5f)
+
+        advance(Duration.ofMillis(4_900))
+        assertEquals(1, createdPlayers.size, "Nothing within the grace period")
+
+        advance(Duration.ofMillis(200))
+        assertEquals(raw(R.raw.bruh), shadowOf(createdPlayers.last()).sourceUri)
+        assertFalse(createdPlayers.last().isLooping, "A single bruh")
+
+        advance(Duration.ofSeconds(10))
+        val bruhs = createdPlayers.count { shadowOf(it).sourceUri == raw(R.raw.bruh) }
+        assertEquals(3, bruhs)
+
+        advance(Duration.ofSeconds(1))
+        val scream = createdPlayers.last()
+        assertEquals(raw(R.raw.scream), shadowOf(scream).sourceUri)
+        assertTrue(scream.isLooping && scream.isPlaying, "Screams until the light is back")
+        assertFalse(createdPlayers.first().isPlaying, "The tornado stays paused meanwhile")
+
+        sendLight(300f)
+        assertFalse(createdPlayers.any { it.isPlayingSafely() })
+    }
+
+    private fun MediaPlayer.isPlayingSafely() =
+        try {
+            isPlaying
+        } catch (e: IllegalStateException) {
+            false
+        }
+
+    private val sensorManager
+        get() = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+
+    private fun addLightSensor() {
+        shadowOf(sensorManager).addSensor(ShadowSensor.newInstance(Sensor.TYPE_LIGHT))
+    }
+
+    private fun sendLight(lux: Float) {
+        shadowOf(sensorManager)
+            .sendSensorEventToListeners(
+                SensorEventBuilder.newBuilder()
+                    .setSensor(ShadowSensor.newInstance(Sensor.TYPE_LIGHT))
+                    .setValues(floatArrayOf(lux))
+                    .build()
+            )
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun advance(duration: Duration) {
+        shadowOf(Looper.getMainLooper()).idleFor(duration)
     }
 
     private val maxDeviceAlarmVolume

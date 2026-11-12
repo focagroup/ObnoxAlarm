@@ -74,10 +74,14 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
 
         setContent {
             LuxAlarmTheme {
+                val gate by AlarmService.gateState.collectAsState()
                 AlarmRingingScreen(
                     currentLightLevel = currentLightLevel,
                     requiredLightLevel = requiredLightLevel,
                     onStopAlarm = { stopAlarm() },
+                    canStop = gate.canStop,
+                    holdRemainingMs = gate.holdRemainingMs,
+                    violated = gate.violated,
                 )
             }
         }
@@ -154,6 +158,9 @@ fun AlarmRingingScreen(
     currentLightLevel: Float,
     requiredLightLevel: Float,
     onStopAlarm: () -> Unit,
+    canStop: Boolean = currentLightLevel >= requiredLightLevel,
+    holdRemainingMs: Long? = null,
+    violated: Boolean = false,
 ) {
     val currentTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
     val currentDate = remember {
@@ -168,7 +175,8 @@ fun AlarmRingingScreen(
             Color(0xFFA855F7), // Light purple
         )
 
-    val isButtonEnabled = currentLightLevel >= requiredLightLevel
+    val isButtonEnabled = canStop
+    val isBrightEnough = currentLightLevel >= requiredLightLevel
 
     Box(
         modifier =
@@ -189,8 +197,9 @@ fun AlarmRingingScreen(
         ) {
             TimeDisplay(greeting, currentDate, currentTime)
             Spacer(modifier = Modifier.height(48.dp))
-            LightSensorIndicator(currentLightLevel, requiredLightLevel, isButtonEnabled)
-            AlarmControlButton(isButtonEnabled, onStopAlarm)
+            LightSensorIndicator(currentLightLevel, requiredLightLevel, isBrightEnough)
+            HoldIndicator(holdRemainingMs, isButtonEnabled, violated)
+            AlarmControlButton(isButtonEnabled, isBrightEnough, onStopAlarm)
         }
     }
 }
@@ -278,7 +287,35 @@ private fun LightSensorIndicator(
 }
 
 @Composable
-private fun AlarmControlButton(isButtonEnabled: Boolean, onStopAlarm: () -> Unit) {
+private fun HoldIndicator(holdRemainingMs: Long?, canStop: Boolean, violated: Boolean) {
+    val text =
+        when {
+            canStop -> null
+            violated -> "Light went out! The timer starts over."
+            holdRemainingMs != null -> "Keep the light on: ${formatRemaining(holdRemainingMs)}"
+            else -> null
+        } ?: return
+    Text(
+        text = text,
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Medium,
+        color = if (violated) Color(0xFFFFC2C2) else Color.White,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(bottom = 24.dp),
+    )
+}
+
+internal fun formatRemaining(ms: Long): String {
+    val totalSeconds = (ms + 999) / 1000
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+}
+
+@Composable
+private fun AlarmControlButton(
+    isButtonEnabled: Boolean,
+    isBrightEnough: Boolean,
+    onStopAlarm: () -> Unit,
+) {
     ElevatedButton(
         onClick = onStopAlarm,
         enabled = isButtonEnabled,
@@ -302,7 +339,12 @@ private fun AlarmControlButton(isButtonEnabled: Boolean, onStopAlarm: () -> Unit
             ),
     ) {
         Text(
-            text = if (isButtonEnabled) "Turn Off Alarm" else "Need More Light",
+            text =
+                when {
+                    isButtonEnabled -> "Turn Off Alarm"
+                    isBrightEnough -> "Keep It Bright"
+                    else -> "Need More Light"
+                },
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium,
         )

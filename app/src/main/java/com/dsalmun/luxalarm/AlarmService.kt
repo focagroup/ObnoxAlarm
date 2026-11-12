@@ -27,6 +27,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.database.ContentObserver
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -39,6 +43,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -49,6 +54,9 @@ import androidx.annotation.VisibleForTesting
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class AlarmService : Service() {
     private var mediaPlayer: MediaPlayer? = null
@@ -59,12 +67,36 @@ class AlarmService : Service() {
     private var forcedAlarmVolume: Int? = null
     private var alarmVolumeWatcher: ContentObserver? = null
 
+    private var audioAttrs: AudioAttributes? = null
+    private var playerVolume = 1f
+    private var vibrationEnabled = false
+    private var vibrating = false
+    private var gate: LightGate? = null
+    private var sensorManager: SensorManager? = null
+    private var lightListener: SensorEventListener? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val ticker =
+        object : Runnable {
+            override fun run() {
+                gate?.let { applyGate(it.update(SystemClock.elapsedRealtime())) }
+                handler.postDelayed(this, TICK_MS)
+            }
+        }
+    private var punishPlayer: MediaPlayer? = null
+    private var bruhsPlayed = 0
+    private var screaming = false
+
     companion object {
         const val ACTION_STOP_ALARM = "com.dsalmun.luxalarm.STOP_ALARM"
         internal const val ALARM_CHANNEL_ID = "alarm_channel_id"
         const val ALARM_NOTIFICATION_ID = 1001
+        private const val TICK_MS = 250L
         var isRunning = false
             @VisibleForTesting internal set
+
+        @VisibleForTesting internal val _gateState = MutableStateFlow(GateState())
+        /** Live state of the light hold, for the ringing screen to show and obey. */
+        val gateState: StateFlow<GateState> = _gateState.asStateFlow()
     }
 
     /** Started, never bound: the alarm outlives any client, so there is nothing to bind to. */
@@ -94,7 +126,12 @@ class AlarmService : Service() {
         vibrationEnabled: Boolean,
     ) {
         isRunning = true
+        _gateState.value = GateState()
         val audioAttrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
+        this.audioAttrs = audioAttrs
+        this.vibrationEnabled = vibrationEnabled
+        val obnoxious = AppContainer.settingsManager.isObnoxiousMode()
+        val alarmSound = if (obnoxious) rawUri(R.raw.tornado) else ringtoneUri
 
         // Notification, ringtone and vibration are started independently so they also fail
         // independently: whatever survives is all that stands between the user and a missed alarm.
@@ -111,10 +148,106 @@ class AlarmService : Service() {
                 startForeground(ALARM_NOTIFICATION_ID, notification)
             }
         }
-        independently { startRingtone(ringtoneUri, volume, audioAttrs) }
+        independently { startRingtone(alarmSound, volume, audioAttrs) }
         if (vibrationEnabled) {
             independently { startVibration(audioAttrs) }
         }
+        independently { startLightGate(obnoxious) }
+    }
+
+    private fun rawUri(resId: Int): String = "android.resource://$packageName/$resId"
+
+    /** The service, not the screen, watches the light, so leaving the screen changes nothing. */
+    private fun startLightGate(obnoxious: Boolean) {
+        val settings = AppContainer.settingsManager
+        gate =
+            LightGate(
+                requiredLux = settings.getRequiredLuxLevel(),
+                minHoldMs = settings.getMinLightMinutes() * 60_000L,
+                obnoxious = obnoxious,
+            )
+        val manager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val sensor = manager?.getDefaultSensor(Sensor.TYPE_LIGHT)
+        if (manager != null && sensor != null) {
+            val listener =
+                object : SensorEventListener {
+                    override fun onSensorChanged(event: SensorEvent) {
+                        val g = gate ?: return
+                        applyGate(g.onLight(event.values[0], SystemClock.elapsedRealtime()))
+                    }
+
+                    override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+                }
+            manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager = manager
+            lightListener = listener
+        }
+        handler.postDelayed(ticker, TICK_MS)
+    }
+
+    private fun applyGate(state: GateState) {
+        if (alarmStopped) return
+        _gateState.value = state
+        when (state.sound) {
+            GateSound.ALARM -> {
+                stopPunishment()
+                mediaPlayer?.let { if (!it.isPlaying) it.start() }
+                setVibrating(true)
+            }
+            GateSound.SILENT -> {
+                stopPunishment()
+                mediaPlayer?.let { if (it.isPlaying) it.pause() }
+                setVibrating(false)
+            }
+            GateSound.PUNISH -> {
+                mediaPlayer?.let { if (it.isPlaying) it.pause() }
+                setVibrating(true)
+                while (bruhsPlayed < state.bruhCount) {
+                    bruhsPlayed++
+                    playBruh(thenScream = bruhsPlayed == 3)
+                }
+            }
+        }
+    }
+
+    private fun playBruh(thenScream: Boolean) {
+        val attrs = audioAttrs ?: return
+        punishPlayer?.release()
+        punishPlayer =
+            createPlayerForUri(rawUri(R.raw.bruh).toUri(), attrs, playerVolume, looping = false)
+                ?.apply {
+                    setOnCompletionListener {
+                        if (thenScream && !alarmStopped && bruhsPlayed == 3 && !screaming) {
+                            startScream()
+                        }
+                    }
+                }
+        if (thenScream && punishPlayer == null) startScream()
+    }
+
+    private fun startScream() {
+        val attrs = audioAttrs ?: return
+        screaming = true
+        punishPlayer?.release()
+        punishPlayer = createPlayerForUri(rawUri(R.raw.scream).toUri(), attrs, playerVolume)
+    }
+
+    private fun stopPunishment() {
+        punishPlayer?.apply {
+            setOnCompletionListener(null)
+            if (isPlaying) stop()
+            release()
+        }
+        punishPlayer = null
+        bruhsPlayed = 0
+        screaming = false
+    }
+
+    private fun setVibrating(on: Boolean) {
+        if (!vibrationEnabled || on == vibrating) return
+        val attrs = audioAttrs ?: return
+        if (on) independently { startVibration(attrs) } else vibrator?.cancel()
+        vibrating = on
     }
 
     /** Runs one alarm signal, swallowing a failure so the others still get their turn. */
@@ -136,7 +269,7 @@ class AlarmService : Service() {
         audioManager?.requestAudioFocus(audioFocusRequest!!)
 
         overrideAlarmStreamVolume(volume)
-        val playerVolume = if (forcedAlarmVolume != null) 1f else volume.coerceIn(0f, 1f)
+        playerVolume = if (forcedAlarmVolume != null) 1f else volume.coerceIn(0f, 1f)
 
         val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         val selectedAlarmUri = ringtoneUri?.toUri()
@@ -229,12 +362,14 @@ class AlarmService : Service() {
         } else {
             @Suppress("DEPRECATION") vibrator?.vibrate(vibrationEffect, audioAttrs)
         }
+        vibrating = true
     }
 
     private fun createPlayerForUri(
         uri: Uri?,
         audioAttrs: AudioAttributes,
         volume: Float,
+        looping: Boolean = true,
     ): MediaPlayer? {
         if (uri == null) return null
         var player: MediaPlayer? = null
@@ -245,7 +380,7 @@ class AlarmService : Service() {
                 setAudioAttributes(audioAttrs)
                 setVolume(volume, volume)
                 setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
-                isLooping = true
+                isLooping = looping
                 prepare()
                 start()
             }
@@ -260,6 +395,14 @@ class AlarmService : Service() {
         if (alarmStopped) return
         alarmStopped = true
         isRunning = false
+
+        handler.removeCallbacks(ticker)
+        lightListener?.let { sensorManager?.unregisterListener(it) }
+        lightListener = null
+        sensorManager = null
+        gate = null
+        stopPunishment()
+        _gateState.value = GateState()
 
         mediaPlayer?.apply {
             if (isPlaying) {

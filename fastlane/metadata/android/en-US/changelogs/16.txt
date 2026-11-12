@@ -1,0 +1,3 @@
+- Renamed to ObnoxAlarm, with a new icon
+- New setting: the light has to stay on for 10 to 60 minutes before the alarm can be turned off
+- New "tornado" setting: a tornado siren alarm, and bruhs followed by screaming when the light goes out too early

@@ -42,6 +42,12 @@ class AppContainerTestRule(val repository: FakeAlarmRepository = FakeAlarmReposi
     override fun starting(description: Description) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         AppContainer.repository = repository
+        // Obnoxious mode is one-way by design, so only a wipe between tests can turn it off.
+        context
+            .getSharedPreferences(SettingsManager.LOCK_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
         settingsManager = SettingsManager(context)
         AppContainer.settingsManager = settingsManager
         AppContainer.ioDispatcher = StandardTestDispatcher(scheduler)

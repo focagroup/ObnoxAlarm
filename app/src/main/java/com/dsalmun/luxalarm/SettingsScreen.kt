@@ -22,6 +22,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -90,6 +92,9 @@ fun SettingsScreen(
 ) {
     val requiredLuxLevel by settingsManager.requiredLuxLevel.collectAsState()
     var sliderValue by remember(requiredLuxLevel) { mutableFloatStateOf(requiredLuxLevel) }
+    val minLightMinutes by settingsManager.minLightMinutes.collectAsState()
+    var minutesValue by remember(minLightMinutes) { mutableIntStateOf(minLightMinutes) }
+    val obnoxiousMode by settingsManager.obnoxiousMode.collectAsState()
 
     SettingsScreenContent(
         requiredLuxLevel = sliderValue,
@@ -97,6 +102,11 @@ fun SettingsScreen(
         onBackClick = onBackClick,
         onLuxLevelChange = { sliderValue = it },
         onLuxLevelChangeFinished = { settingsManager.setRequiredLuxLevel(sliderValue) },
+        minLightMinutes = minutesValue,
+        onMinLightMinutesChange = { minutesValue = it },
+        onMinLightMinutesChangeFinished = { settingsManager.setMinLightMinutes(minutesValue) },
+        obnoxiousMode = obnoxiousMode,
+        onEnableObnoxiousMode = { settingsManager.enableObnoxiousMode() },
     )
 }
 
@@ -108,6 +118,11 @@ fun SettingsScreenContent(
     onBackClick: () -> Unit,
     onLuxLevelChange: (Float) -> Unit,
     onLuxLevelChangeFinished: () -> Unit,
+    minLightMinutes: Int = SettingsManager.DEFAULT_MIN_LIGHT_MINUTES,
+    onMinLightMinutesChange: (Int) -> Unit = {},
+    onMinLightMinutesChangeFinished: () -> Unit = {},
+    obnoxiousMode: Boolean = false,
+    onEnableObnoxiousMode: () -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -131,7 +146,11 @@ fun SettingsScreenContent(
         },
     ) { innerPadding ->
         Column(
-            modifier = Modifier.padding(innerPadding).fillMaxSize().padding(16.dp),
+            modifier =
+                Modifier.padding(innerPadding)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
             verticalArrangement = Arrangement.Top,
         ) {
             LuxLevelSetting(
@@ -140,6 +159,14 @@ fun SettingsScreenContent(
                 onValueChange = onLuxLevelChange,
                 onValueChangeFinished = onLuxLevelChangeFinished,
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            MinLightDurationSetting(
+                minutes = minLightMinutes,
+                onValueChange = onMinLightMinutesChange,
+                onValueChangeFinished = onMinLightMinutesChangeFinished,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            ObnoxiousModeSetting(enabled = obnoxiousMode, onEnable = onEnableObnoxiousMode)
         }
     }
 }
@@ -248,6 +275,106 @@ internal fun LuxLevelSetting(
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun MinLightDurationSetting(
+    minutes: Int,
+    onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Minimum Light Duration",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text =
+                    "The light has to stay on this long without a break before the alarm can " +
+                        "be turned off. A flashlight won't cut it.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "${SettingsManager.MIN_LIGHT_MINUTES}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+                Slider(
+                    value = minutes.toFloat(),
+                    onValueChange = { onValueChange(kotlin.math.round(it).toInt()) },
+                    onValueChangeFinished = onValueChangeFinished,
+                    valueRange =
+                        SettingsManager.MIN_LIGHT_MINUTES.toFloat()..SettingsManager
+                                .MAX_LIGHT_MINUTES
+                                .toFloat(),
+                    steps =
+                        SettingsManager.MAX_LIGHT_MINUTES - SettingsManager.MIN_LIGHT_MINUTES - 1,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text = "${SettingsManager.MAX_LIGHT_MINUTES}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "$minutes min",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ObnoxiousModeSetting(enabled: Boolean, onEnable: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "tornado",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text =
+                        if (enabled) "a wise choice has been made"
+                        else "Makes the alarm a lot more convincing.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+            Checkbox(
+                checked = enabled,
+                onCheckedChange = { if (it && !enabled) onEnable() },
+                enabled = !enabled,
             )
         }
     }
